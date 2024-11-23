@@ -238,167 +238,147 @@ MPI_Type_comit(&PointType);
 MPI_Send(coord,numCoords,PointType,dest,tag,MCW);
 MPI_Recv(coords,numCoords,PointType,source,tag,MCW,&stat);
 */
+bool sendLink(int32_t Id, int dest) {
+    int rank, size;
+    MPI_Comm_rank(MCW, &rank);
+    MPI_Comm_size(MCW, &size);
+    
+    streamlink *toSend = takeOut(Id);
+    if(toSend == NULL)
+        return false;
+    if(toSend->terminated == true) {
+        linkSetInsert(toSend);
+        return false;
+    }
+    
+    MPI_Request req;
+    MPI_Send(&(toSend->Id), 1, MPI_LONG, dest, 1, MCW);  // send Id
+    MPI_Send(&(toSend->u1), 1, MPI_LONG, dest, 2, MCW);
+    MPI_Send(&(toSend->u2), 1, MPI_LONG, dest, 3, MCW);
+    MPI_Send(&(toSend->d), 1, MPI_LONG, dest, 4, MCW);
+    MPI_Send(&(toSend->elevU), 1, MPI_DOUBLE, dest, 5, MCW);
+    MPI_Send(&(toSend->elevD), 1, MPI_DOUBLE, dest, 6, MCW);
+    MPI_Send(&(toSend->length), 1, MPI_DOUBLE, dest, 7, MCW);
+    MPI_Send(&(toSend->order), 1, MPI_SHORT, dest, 8, MCW);
+    MPI_Send(&(toSend->numCoords), 1, MPI_LONG, dest, 9, MCW);
+    MPI_Send(&(toSend->magnitude), 1, MPI_LONG, dest, 11, MCW);
+    MPI_Send(&(toSend->shapeId), 1, MPI_LONG, dest, 12, MCW);
 
-bool sendLink(int32_t Id, int dest){
-	int rank,size;
-	MPI_Comm_rank(MCW,&rank);
-	MPI_Comm_size(MCW,&size);
+    // Create MPI Data types
+    MPI_Datatype PointType, oldtypes[2];
+    int blockcounts[2];
+    MPI_Aint offsets[2], extent, lb;
+    MPI_Status stat;
 
+    // Set up first block of storage
+    offsets[0] = 0;
+    oldtypes[0] = MPI_LONG;
+    blockcounts[0] = 2;
 
-	streamlink *toSend = takeOut(Id);
-	if(toSend == NULL)
-		return false;
-	if(toSend->terminated == true){
-		linkSetInsert(toSend);
-		return false;
-	}
-	
-	MPI_Request req;
-	MPI_Send(&(toSend->Id)		,1,MPI_LONG		,dest,1,MCW);//send Id
-	MPI_Send(&(toSend->u1)		,1,MPI_LONG		,dest,2,MCW);
-	MPI_Send(&(toSend->u2)		,1,MPI_LONG		,dest,3,MCW);
-	MPI_Send(&(toSend->d)		,1,MPI_LONG		,dest,4,MCW);
-	MPI_Send(&(toSend->elevU)	,1,MPI_DOUBLE	,dest,5,MCW);
-	MPI_Send(&(toSend->elevD)	,1,MPI_DOUBLE	,dest,6,MCW);
-	MPI_Send(&(toSend->length)	,1,MPI_DOUBLE		,dest,7,MCW);
-	MPI_Send(&(toSend->order)	,1,MPI_SHORT		,dest,8,MCW);
-	MPI_Send(&(toSend->numCoords)	,1,MPI_LONG	,dest,9,MCW);
-	MPI_Send(&(toSend->magnitude)	,1,MPI_LONG	,dest,11,MCW);
-	MPI_Send(&(toSend->shapeId)	,1,MPI_LONG	,dest,12,MCW);
+    // Set up second block of storage
+    // Replace MPI_Type_extent with MPI_Type_get_extent
+    MPI_Type_get_extent(MPI_LONG, &lb, &extent);
+    offsets[1] = 2 * extent;
+    oldtypes[1] = MPI_FLOAT;
+    blockcounts[1] = 3;
 
-	//More information on This at :https://computing.llnl.gov/tutorials/mpi/
-	//create mpi Data types
-	MPI_Datatype PointType, oldtypes[2];  
-	int          blockcounts[2]; 
+    // Replace MPI_Type_struct with MPI_Type_create_struct
+    MPI_Type_create_struct(2, blockcounts, offsets, oldtypes, &PointType);
+    MPI_Type_commit(&PointType);
 
-	// MPI_Aint offsets[2], extent;
-	// MPI_Status stat; 
-	// //set up first blocks of storage
-	// offsets[0] = 0;
-	// oldtypes[0] = MPI_LONG;
-	// blockcounts[0]= 2;
-	// //set up second block of storage
-	// MPI_Type_extent(MPI_LONG, &extent);
-	// offsets[1] = 2 * extent;
-	// oldtypes[1] = MPI_FLOAT;
-	// blockcounts[1] = 3;
-	// //create define it as an MPI data type and comit it.
-	// MPI_Type_struct(2,blockcounts,offsets,oldtypes,&PointType);
-	// MPI_Type_commit(&PointType);
+    MPI_Status status;
+    char* ptr;
+    int place;
+    point *buf;
+    point *sendArr = new point[toSend->numCoords];
+    
+    for(int i = 0; i < toSend->numCoords; i++) {
+        sendArr[i].x = toSend->coord.front().x;
+        sendArr[i].y = toSend->coord.front().y;
+        sendArr[i].elev = toSend->coord.front().elev;
+        sendArr[i].area = toSend->coord.front().area;
+        sendArr[i].length = toSend->coord.front().length;
+        toSend->coord.pop();
+    }
 
-	MPI_Aint offsets[2], lb, extent;
-	MPI_Status stat; 
-	//set up first blocks of storage
-	offsets[0] = 0;
-	oldtypes[0] = MPI_LONG;
-	blockcounts[0]= 2;
-	//set up second block of storage
-	MPI_Type_get_extent(MPI_LONG, &lb, &extent);  // Replace MPI_Type_extent with MPI_Type_get_extent
-	offsets[1] = 2 * extent;
-	oldtypes[1] = MPI_FLOAT;
-	blockcounts[1] = 3;
-	//create define it as an MPI data type and comit it.
-	MPI_Type_create_struct(2, blockcounts, offsets, oldtypes, &PointType);  // Replace MPI_Type_struct with MPI_Type_create_struct
-	MPI_Type_commit(&PointType);
+    int bsize = toSend->numCoords * sizeof(point) * 2 + MPI_BSEND_OVERHEAD;
+    buf = new point[bsize];
+    MPI_Buffer_attach(buf, bsize);
+    MPI_Bsend(sendArr, toSend->numCoords, PointType, dest, 10, MCW);
+    MPI_Buffer_detach(&ptr, &place);
 
-
-	MPI_Status status;
-
-	char *ptr;
-	int place;
-	point *buf;
-	point *sendArr;
-	sendArr = new point[toSend->numCoords];
-	for(int i = 0; i < toSend->numCoords ;i++)
-	{
-		sendArr[i].x = toSend->coord.front().x;//y elec area length
-		sendArr[i].y = toSend->coord.front().y;
-		sendArr[i].elev = toSend->coord.front().elev;
-		sendArr[i].area = toSend->coord.front().area;
-		sendArr[i].length = toSend->coord.front().length;
-		toSend->coord.pop();
-	}	
-
-
-	int bsize = toSend->numCoords*sizeof(point)*2+MPI_BSEND_OVERHEAD;  // Experimentally this seems to need to have >47 added for overhead
-	buf = new point[bsize];
-	
-	MPI_Buffer_attach(buf,bsize);
-	MPI_Bsend(sendArr,toSend->numCoords,PointType,dest,10,MCW);
-	MPI_Buffer_detach(&ptr,&place);
-	delete sendArr;
-	delete toSend;
-
-	return true;
+    delete[] sendArr;  // Fixed: use delete[] for arrays
+    delete toSend;
+    
+    return true;
 }
-bool recvLink(int src){
-	streamlink* toRecv = new streamlink;
-	MPI_Status stat;
-	int rank,size;
-	MPI_Comm_rank(MCW,&rank);
-	MPI_Comm_size(MCW,&size);
+bool recvLink(int src) {
+    streamlink* toRecv = new streamlink;
+    MPI_Status stat;
+    int rank, size;
+    MPI_Comm_rank(MCW, &rank);
+    MPI_Comm_size(MCW, &size);
 
-	MPI_Recv(&(toRecv->Id)		,1,MPI_LONG		,src,1,MCW,&stat);//send Id
-	MPI_Recv(&(toRecv->u1)		,1,MPI_LONG		,src,2,MCW,&stat);
-	MPI_Recv(&(toRecv->u2)		,1,MPI_LONG		,src,3,MCW,&stat);
-	MPI_Recv(&(toRecv->d)		,1,MPI_LONG		,src,4,MCW,&stat);
-	MPI_Recv(&(toRecv->elevU)	,1,MPI_DOUBLE		,src,5,MCW,&stat);
-	MPI_Recv(&(toRecv->elevD)	,1,MPI_DOUBLE		,src,6,MCW,&stat);
-	MPI_Recv(&(toRecv->length)	,1,MPI_DOUBLE		,src,7,MCW,&stat);
-	MPI_Recv(&(toRecv->order)	,1,MPI_SHORT		,src,8,MCW,&stat);
-	MPI_Recv(&(toRecv->numCoords)	,1,MPI_LONG		,src,9,MCW,&stat);
-	MPI_Recv(&(toRecv->magnitude)	,1,MPI_LONG		,src,11,MCW,&stat);
-	MPI_Recv(&(toRecv->shapeId)	,1,MPI_LONG		,src,12,MCW,&stat);
+    // Receive basic data
+    MPI_Recv(&(toRecv->Id), 1, MPI_LONG, src, 1, MCW, &stat);
+    MPI_Recv(&(toRecv->u1), 1, MPI_LONG, src, 2, MCW, &stat);
+    MPI_Recv(&(toRecv->u2), 1, MPI_LONG, src, 3, MCW, &stat);
+    MPI_Recv(&(toRecv->d), 1, MPI_LONG, src, 4, MCW, &stat);
+    MPI_Recv(&(toRecv->elevU), 1, MPI_DOUBLE, src, 5, MCW, &stat);
+    MPI_Recv(&(toRecv->elevD), 1, MPI_DOUBLE, src, 6, MCW, &stat);
+    MPI_Recv(&(toRecv->length), 1, MPI_DOUBLE, src, 7, MCW, &stat);
+    MPI_Recv(&(toRecv->order), 1, MPI_SHORT, src, 8, MCW, &stat);
+    MPI_Recv(&(toRecv->numCoords), 1, MPI_LONG, src, 9, MCW, &stat);
+    MPI_Recv(&(toRecv->magnitude), 1, MPI_LONG, src, 11, MCW, &stat);
+    MPI_Recv(&(toRecv->shapeId), 1, MPI_LONG, src, 12, MCW, &stat);
 
-	//More information on This at :https://computing.llnl.gov/tutorials/mpi/
-	//create mpi Data types
-	MPI_Datatype PointType, oldtypes[2];  
-	int          blockcounts[2]; 
+    // Create MPI Data types
+    MPI_Datatype PointType, oldtypes[2];
+    int blockcounts[2];
+    MPI_Aint offsets[2], extent, lb;
+    MPI_Status stat1;
 
-	MPI_Aint offsets[2], lb, extent;
-	MPI_Status stat1; 
-	//set up first blocks of storage
-	offsets[0] = 0;
-	oldtypes[0] = MPI_LONG;
-	blockcounts[0]= 2;
-	//set up second block of storage
-	MPI_Type_get_extent(MPI_LONG, &lb, &extent);
-	// MPI_Type_extent(MPI_LONG, &extent);
-	offsets[1] = 2 * extent;
-	oldtypes[1] = MPI_FLOAT;
-	blockcounts[1] = 3;
-	//create define it as an MPI data type and comit it.
-	// MPI_Type_struct(2,blockcounts,offsets,oldtypes,&PointType);
-	MPI_Type_create_struct(2, blockcounts, offsets, oldtypes, &PointType);  // Replace MPI_Type_struct with MPI_Type_create_struct
-	MPI_Type_commit(&PointType);
-	int flag;
-	//MPI_Request req;
-	//MPI_Test(&req,&flag,&stat1);
-	//if(!(stat1.MPI_SOURCE >=0 && stat1.MPI_SOURCE < size))
-	//	return false;
-//	toRecv->coord = new point[toRecv->numCoords];
+    // Set up first block of storage
+    offsets[0] = 0;
+    oldtypes[0] = MPI_LONG;
+    blockcounts[0] = 2;
 
-	point *recvArr;
-	recvArr = new point[toRecv->numCoords];
-	MPI_Recv(recvArr,toRecv->numCoords,PointType,src,10,MCW,&stat);
-	toRecv->terminated = false;
-	
-	point temp;
-	for(int i=0;i<toRecv->numCoords > 0;i++)
-	{
-		temp.x = recvArr[i].x;//y elec area length
-		temp.y = recvArr[i].y;//y elec area length
-		temp.elev = recvArr[i].elev;//y elec area length
-		temp.area = recvArr[i].area;//y elec area length
-		temp.length = recvArr[i].length;//y elec area length
-		toRecv->coord.push(temp);
-	}	
+    // Set up second block of storage - using MPI_Type_get_extent instead of MPI_Type_extent
+    MPI_Type_get_extent(MPI_LONG, &lb, &extent);
+    offsets[1] = 2 * extent;
+    oldtypes[1] = MPI_FLOAT;
+    blockcounts[1] = 3;
 
-	linkSetInsert(toRecv);
-	delete recvArr;
+    // Create and commit type - using MPI_Type_create_struct instead of MPI_Type_struct
+    MPI_Type_create_struct(2, blockcounts, offsets, oldtypes, &PointType);
+    MPI_Type_commit(&PointType);
 
-	return true;
+    // Receive coordinate data
+    point* recvArr = new point[toRecv->numCoords];
+    MPI_Recv(recvArr, toRecv->numCoords, PointType, src, 10, MCW, &stat);
+    
+    toRecv->terminated = false;
+    point temp;
+    
+    // Fixed loop condition that had a logic error
+    for(int i = 0; i < toRecv->numCoords; i++) {
+        temp.x = recvArr[i].x;
+        temp.y = recvArr[i].y;
+        temp.elev = recvArr[i].elev;
+        temp.area = recvArr[i].area;
+        temp.length = recvArr[i].length;
+        toRecv->coord.push(temp);
+    }
+
+    linkSetInsert(toRecv);
+    delete[] recvArr;  // Fixed: use delete[] for arrays
+    
+    // Clean up MPI type
+    MPI_Type_free(&PointType);
+    
+    return true;
 }
+
 //returns -1 if coord not found.  returns ID if found.
 long findLinkThatEndsAt(long x, long y, tdpartition *elev){
 	long ID = -1;
